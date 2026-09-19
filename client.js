@@ -19,17 +19,31 @@ window.__ModuleLoader__.load({
       const [code, setCode] = useState("");
       const [msg, setMsg] = useState(null);
       const [error, setError] = useState(null);
+      const [remoteBlockInfo, setRemoteBlockInfo] = useState(null); // 'remote' | 'origin' | null
       const [submitting, setSubmitting] = useState(false);
 
       const fetchStatus = useCallback(async () => {
         try {
           setLoading(true);
+          setError(null);
+          setRemoteBlockInfo(null);
           const res = await fetch(`${API_BASE}/status`);
           if (res.ok) {
             const data = await res.json();
             setStatus(data);
           } else {
-            setError("获取认证状态失败");
+            let errorData = null;
+            try {
+              errorData = await res.json();
+            } catch {}
+            const errorCode = errorData?.error;
+            if (res.status === 403 && (errorCode === "admin_forbidden_remote" || errorCode === "forbidden_remote")) {
+              setRemoteBlockInfo("remote");
+            } else if (res.status === 403 && errorCode === "forbidden_origin") {
+              setRemoteBlockInfo("origin");
+            } else {
+              setError(errorCode ? `获取认证状态失败: ${errorCode}` : `获取认证状态失败 (HTTP ${res.status})`);
+            }
           }
         } catch (e) {
           setError(e.message || "请求状态异常");
@@ -52,12 +66,16 @@ window.__ModuleLoader__.load({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ owner: "admin-local" }),
           });
-          const data = await res.json();
+          const data = await res.json().catch(() => ({}));
           if (res.ok) {
             setBinding(data);
             setCode("");
           } else {
-            setError(data.error || "生成绑定失败");
+            if (res.status === 403 && (data.error === "admin_forbidden_remote" || data.error === "forbidden_remote")) {
+              setError("操作被拒绝：动态口令绑定与二维码查看仅限在电脑本机（127.0.0.1）进行。");
+            } else {
+              setError(data.error || `生成绑定失败 (HTTP ${res.status})`);
+            }
           }
         } catch (e) {
           setError(e.message || "网络请求异常");
@@ -104,10 +122,12 @@ window.__ModuleLoader__.load({
         }
       };
 
-      if (loading && !status) {
+      if (loading && !status && !remoteBlockInfo) {
         return h("div", { style: { padding: 24, color: "#64748b" } }, "正在加载安全认证状态...");
       }
 
+      const isRemote = remoteBlockInfo === "remote";
+      const isOriginBlocked = remoteBlockInfo === "origin";
       const isActive = status?.state === "active";
 
       return h(
@@ -129,9 +149,120 @@ window.__ModuleLoader__.load({
           )
         ),
 
-        // 提示信息
-        msg && h("div", { style: { background: "rgba(16, 185, 129, 0.15)", border: "1px solid #10b981", color: "#34d399", padding: "10px 14px", borderRadius: 8, marginBottom: 16, fontSize: 13 } }, msg),
-        error && h("div", { style: { background: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", color: "#f87171", padding: "10px 14px", borderRadius: 8, marginBottom: 16, fontSize: 13 } }, error),
+        // 安全隔离指引卡片 (移动端/远程访问)
+        isRemote &&
+          h(
+            "div",
+            {
+              style: {
+                background: "rgba(59, 130, 246, 0.12)",
+                border: "1px solid rgba(59, 130, 246, 0.35)",
+                borderRadius: 10,
+                padding: "16px 20px",
+                marginBottom: 20,
+                fontSize: 13,
+                lineHeight: 1.6,
+              },
+            },
+            h(
+              "div",
+              {
+                style: {
+                  fontWeight: 600,
+                  fontSize: 14,
+                  color: "#60a5fa",
+                  marginBottom: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                },
+              },
+              "🛡️ 安全隔离机制生效中（当前为移动端 / 远程访问）"
+            ),
+            h(
+              "div",
+              { style: { color: "#cbd5e1" } },
+              "为了防止动态口令密钥与绑定二维码通过局域网或公网传输泄露，管理面板已开启 Fail-Closed 本地隔离守护，仅限在电脑本机通过环回接口访问。"
+            ),
+            h(
+              "div",
+              { style: { marginTop: 6, color: "#34d399", fontWeight: 500 } },
+              "✅ 当前手机端动态口令防护依然处于正常生效状态，登录时正常校验 6 位动态码。"
+            ),
+            h(
+              "div",
+              { style: { marginTop: 6, color: "#94a3b8" } },
+              "如需重新绑定新验证器或查看二维码，请在电脑本机浏览器打开 http://127.0.0.1:3080 进入此设置页。"
+            )
+          ),
+
+        // 来源域名拦截指引卡片
+        isOriginBlocked &&
+          h(
+            "div",
+            {
+              style: {
+                background: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.35)",
+                borderRadius: 10,
+                padding: "14px 18px",
+                marginBottom: 20,
+                fontSize: 13,
+                lineHeight: 1.6,
+              },
+            },
+            h(
+              "div",
+              {
+                style: {
+                  fontWeight: 600,
+                  fontSize: 14,
+                  color: "#fbbf24",
+                  marginBottom: 6,
+                },
+              },
+              "⚠️ 访问来源域名被安全拦截"
+            ),
+            h(
+              "div",
+              { style: { color: "#cbd5e1" } },
+              "动态口令管理面板仅允许从电脑本机 http://127.0.0.1:3080 或 http://localhost:3080 访问。如果您当前使用了局域网 IP 或自定义域名，请改用 127.0.0.1 访问。"
+            )
+          ),
+
+        // 普通提示信息与错误卡片
+        msg &&
+          h(
+            "div",
+            {
+              style: {
+                background: "rgba(16, 185, 129, 0.15)",
+                border: "1px solid #10b981",
+                color: "#34d399",
+                padding: "10px 14px",
+                borderRadius: 8,
+                marginBottom: 16,
+                fontSize: 13,
+              },
+            },
+            msg
+          ),
+        error &&
+          h(
+            "div",
+            {
+              style: {
+                background: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid #ef4444",
+                color: "#f87171",
+                padding: "10px 14px",
+                borderRadius: 8,
+                marginBottom: 16,
+                fontSize: 13,
+              },
+            },
+            error
+          ),
 
         // 状态卡片
         h(
@@ -155,7 +286,9 @@ window.__ModuleLoader__.load({
               h(
                 "div",
                 { style: { fontSize: 13, color: "#94a3b8" } },
-                isActive
+                isRemote
+                  ? "已启用动态口令保护（移动端安全隔离模式，敏感配置已在本地锁定）"
+                  : isActive
                   ? `已启用动态口令保护（凭据版本: v${status.credentialVersion}）`
                   : "尚未完成手机绑定（未配置时远程请求将被安全拒绝）"
               )
@@ -168,17 +301,40 @@ window.__ModuleLoader__.load({
                   borderRadius: 9999,
                   fontSize: 12,
                   fontWeight: 600,
-                  background: isActive ? "#10b981" : "#f59e0b",
+                  background: isRemote ? "#10b981" : isActive ? "#10b981" : "#f59e0b",
                   color: "#fff",
                 },
               },
-              isActive ? "运行中 · 安全" : "未绑定"
+              isRemote ? "运行中 · 远程受保护" : isActive ? "运行中 · 安全" : "未绑定"
             )
           )
         ),
 
         // 绑定动作区
-        !binding
+        isRemote
+          ? h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: 12 } },
+              h(
+                "button",
+                {
+                  disabled: true,
+                  style: {
+                    padding: "10px 18px",
+                    background: "#334155",
+                    color: "#94a3b8",
+                    border: "1px solid #475569",
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "not-allowed",
+                  },
+                },
+                "🔒 绑定与密钥重置仅限电脑本机操作"
+              ),
+              h("span", { style: { fontSize: 13, color: "#94a3b8" } }, "如需更换手机验证器，请在电脑本机打开 http://127.0.0.1:3080")
+            )
+          : !binding
           ? h(
               "div",
               null,
