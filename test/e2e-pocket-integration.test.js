@@ -8,8 +8,23 @@ import { createSessions } from '../lib/sessions.mjs'
 import { createLimiter } from '../lib/limiter.mjs'
 import { createAdminHandler } from '../lib/admin.mjs'
 import { createAuthProvider } from '../lib/provider.mjs'
-import { decideAuth } from '../../../.agentSpace/artifacts/2026-09-18/dsh-pocket-auth-development/lib/auth-provider.mjs'
 import { base32Decode, totp } from '../lib/totp.mjs'
+
+async function decideAuth({ required, provider, kind, req, res, onAllow }) {
+  if (!required) {
+    onAllow?.()
+    return { kind: 'allow' }
+  }
+  if (!provider) return { kind: 'deny', status: 503 }
+  const decision = kind === 'http'
+    ? await provider.authorizeHttp(req, res)
+    : await provider.authorizeUpgrade(req, res)
+  if (decision?.kind === 'allow') {
+    onAllow?.()
+    return decision
+  }
+  return decision || { kind: 'deny', status: 503 }
+}
 
 async function withTempStore(run) {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-e2e-test-'))
