@@ -1,0 +1,40 @@
+{
+  "name": "dsh-pocket-auth",
+  "version": "0.1.0",
+  "description": "DSH Pocket Aegis TOTP authentication extension",
+  "author": "leewf",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leewf/dsh-pocket-auth.git"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node --test --test-timeout=30000 \"test/*.test.js\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.2"
+  },
+  "license": "GPL-2.0"
+}
